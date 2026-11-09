@@ -8,6 +8,12 @@
 #include <vector>
 #include "mode_base.h"
 
+#define WIFI_CHANNEL_MIN 1
+#define WIFI_CHANNEL_MAX 14
+
+//prebuilt modes
+#include "About_mode.h"
+
 enum class DisplayType {
     oled128x64
 };
@@ -20,11 +26,30 @@ enum class KEYS {
     OK, UP, DOWN, X, Y, Z
 };
 
+struct BeaconInfo {
+    uint8_t ap_mac[6];
+    uint8_t target_mac[6];
+    uint8_t channel;
+    int8_t  rssi;
+    char    ssid[33];
+    uint8_t ssidLen;
+};
+
+struct SnifferBuf2 {
+    uint8_t rxControl[12];
+    uint8_t frame[112];
+    uint16_t count;
+    uint16_t frameLen;
+};
+
 class Axius {
     public:
-        Axius() : display(Adafruit_SSD1306(128, 64, &Wire, -1)) {};
+        Axius(const String deviceName) : display(Adafruit_SSD1306(128, 64, &Wire, -1)), aboutMode(this, 0xAA00) {
+            this->deviceName = deviceName;
+        };
         void begin(DisplayType displayType, uint8_t scl, uint8_t sda);
         void tick(); //begin tick
+        void render();
         void endTick(); //end tick
         void setKeys(uint8_t Y_up, uint8_t Z_down, uint8_t X_ok);
         void updateKeys();
@@ -39,15 +64,41 @@ class Axius {
         void drawTextSelector(String text, uint8_t row, bool isselected);
 
         //lines display
-        void openLinesDisplaying();
-        void closeLinesDisplaying();
+        void requestDisplayUpdate() { updateRequested = true; };
+        void openList();
+        void openList(uint8_t maxLines, uint8_t startRow);
+        void closeList();
         void setDisplayingLines(String* params[], uint8_t count);
+        void addListItem(String param);
         void setDisplayingLines(const std::vector<String> &params);
-        bool isLinePicked() { return linePicked; };
-        uint8_t whichLineIsPicked() { linePicked = false; return currentPickedLine; };
+        bool isItemSelected() { return isSelectionConfirmed; };
+        uint8_t getSelectedItemIndex() { isSelectionConfirmed = false; return pickedItemIndex; };
+
+        void startSniffing();
+        void stopSniffing();
+        void setChannel(uint8_t channel);
+        bool beaconQueueIsEmpty();
+        bool popBeacon(BeaconInfo &result);
+
+        bool isSameMac(const uint8_t* cur, const uint8_t* tar) { return memcmp(cur, tar, 6) == 0; }
 
         static Axius* instance;
+
+        const uint8_t DEAFULT_MAX_ITEMS_FIT_IN_SCREEN = 5;
+
+        String deviceName;
     private:
+        static void sniffCallback(uint8_t *buf, uint16_t len);
+        void onFrame(uint8_t* buf, uint16_t len);
+        const static uint8_t BEACON_BUFFER_SIZE = 32;
+        BeaconInfo beaconQueue[BEACON_BUFFER_SIZE];
+        volatile uint8_t queueHead = 0;
+        volatile uint8_t queueTail = 0;
+
+
+        bool updateRequested = true;
+        bool frameReady = false;
+
         DisplayType currentDisplayType;
         Adafruit_SSD1306 display;
         uint8_t scl, sda;
@@ -60,18 +111,23 @@ class Axius {
         
 
         //lines display
-        std::vector<String> curParameters;
-        uint8_t currentLinesMargin = 0;
-        uint8_t currentLinesCursor = 0;
-        bool linePicked = false;
-        uint8_t currentPickedLine = 0;
-        bool linesDisplaying = false;
+        std::vector<String> listItems;
+        uint8_t listScrollOffset = 0;
+        uint8_t ItemCursor = 0;
+        bool isSelectionConfirmed = false;
+        uint8_t pickedItemIndex = 0;
+        bool isListVisible = false;
+        uint8_t MAX_ITEMS_FIT_IN_SCREEN = 5;
+        uint8_t ITEMS_ROW_MARGIN = 0;
 
         //constants
-        const uint8_t MAX_LINES_FIT_IN_SCREEN = 5;
         const uint8_t ROW_HEIGHT = 8;
         const uint8_t COLUMN_TOP_SHIFT = 20;
+
+        //prebuilt modes
+        About aboutMode;
 };
+
 
 
 #endif

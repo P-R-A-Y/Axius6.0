@@ -6,6 +6,7 @@ public:
     About(Axius* axiusInstance, uint16_t ID) : Mode(axiusInstance, ID) {}
 
     void tick() override;
+    void render() override;
     void setup() override;
     const char* getName() const override;
 };
