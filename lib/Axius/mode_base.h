@@ -11,6 +11,8 @@ public:
     virtual void render() = 0;
     virtual void setup() = 0;
     virtual const char* getName() const = 0;
+    virtual const char* const* getRequiredParameters() = 0;
+    virtual uint8_t getRequiredParametersCount() = 0;
 
     uint16_t getID() const { return ID; }
 

@@ -9,8 +9,7 @@ const char* About::getName() const {
 
 void About::render() {
     axius->requestDisplayUpdate();
-    axius->drawText(axius->deviceName, 0);
-    axius->drawText("Powered by Axius 6.0", 1);
+    axius->drawText("Powered by Axius 6.0", 0);
     
     axius->drawText("press OK to exit", 4);
 }

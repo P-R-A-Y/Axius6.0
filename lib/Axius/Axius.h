@@ -13,6 +13,7 @@
 
 //prebuilt modes
 #include "About_mode.h"
+//#include "Memory.h"
 
 enum class DisplayType {
     oled128x64
@@ -44,9 +45,7 @@ struct SnifferBuf2 {
 
 class Axius {
     public:
-        Axius(const String deviceName) : display(Adafruit_SSD1306(128, 64, &Wire, -1)), aboutMode(this, 0xAA00) {
-            this->deviceName = deviceName;
-        };
+        Axius() : display(Adafruit_SSD1306(128, 64, &Wire, -1)), aboutMode(this, 0xAA00)/*, memory()*/ {};
         void begin(DisplayType displayType, uint8_t scl, uint8_t sda);
         void tick(); //begin tick
         void render();
@@ -83,10 +82,9 @@ class Axius {
         bool isSameMac(const uint8_t* cur, const uint8_t* tar) { return memcmp(cur, tar, 6) == 0; }
 
         static Axius* instance;
+        //Memory memory;
 
         const uint8_t DEAFULT_MAX_ITEMS_FIT_IN_SCREEN = 5;
-
-        String deviceName;
     private:
         static void sniffCallback(uint8_t *buf, uint16_t len);
         void onFrame(uint8_t* buf, uint16_t len);

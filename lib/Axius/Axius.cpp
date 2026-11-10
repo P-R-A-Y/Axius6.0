@@ -45,6 +45,7 @@ void Axius::tick() {
             currentMode = getSelectedItemIndex();
             currentState = globalState::INMODE;
             closeList();
+            modes[currentMode]->setup();
             requestDisplayUpdate();
         }
     }
