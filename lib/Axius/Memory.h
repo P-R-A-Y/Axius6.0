@@ -32,6 +32,8 @@ struct ParameterDefinition {  // скелеты параметров объяв�
 
     const void* defaultValue;
     uint16_t valueSize;
+    uint16_t valueAddress;
+    uint16_t defaultValueAddress;
     bool isCoreParameter;
 
     uint8_t flags;
@@ -42,7 +44,7 @@ struct MemoryIndex { // скелеты параметров (общие)
     uint16_t recordSize;
 
     uint16_t valueAddress;
-    uint16_t defaultAddress;
+    uint16_t defaultValueAddress;
     uint16_t valueSize;
 
     uint8_t flags;
@@ -52,45 +54,45 @@ struct MemoryIndex { // скелеты параметров (общие)
     bool isOnEEPROM;
     bool isCoreParameter;
 
-    char name[18];
+    char name[19];
 };
 
 struct MemoryParameter { //параметры (общие)
-    uint16_t index;
-
     void* value = nullptr;
-    void* defaultValue = nullptr;
+    void* defaultValue = nullptr; //нужен ли?
 
     bool loaded = false;
-    bool modified = false;
 };
 
 
 //default parameters----------------------------------------
 static const uint8_t defaultBrightness = 100;
 
-const ParameterDefinition coreParametersBuiltin[] = {
+static ParameterDefinition coreParametersBuiltin[] = {
     {
         "display.brightness",
         MemoryType::UINT8,
         &defaultBrightness,
         sizeof(defaultBrightness),
+        0,
+        0,
+        true,
         LOAD_ON_STARTUP
     }
 };
-ParameterDefinition wrapperParametersBuiltin[] = {}; //TODO придумать когда его заполнять
+static ParameterDefinition wrapperParametersBuiltin[] = {}; //TODO придумать когда его заполнять
 
-const uint8_t coreParameterCount = sizeof(coreParametersBuiltin) / sizeof(coreParametersBuiltin[0]);
-const uint8_t wrapperParameterCount = 0;
+static const uint8_t coreParameterCount = sizeof(coreParametersBuiltin) / sizeof(coreParametersBuiltin[0]);
+static const uint8_t wrapperParameterCount = 0;
 
-uint8_t coreParameterCount_onEEPROM = 0;
-uint8_t wrapperParameterCount_onEEPROM = 0;
+static uint8_t coreParameterCount_onEEPROM = 0;
+static uint8_t wrapperParameterCount_onEEPROM = 0;
 
 static uint8_t SIGNATURE[] = {
-    0x42, 0x42, 0x42, 0x42, 0x42,      // 42 bratuha
-    'a', 'x', 'i', 'u', 's',           // name 12b max
-    0x00,                              // coreParameterCount
-    0x00,                              // eeprom's wrapperParameterCount
+    0x42, 0x42, 0x42, 0x42, 0x42,      // (подпись) 42 братуха
+    'a', 'x', 'i', 'u', 's',           // (подпись) name 5b max
+    0x00,                              // coreParameterCount on EEPROM
+    0x00,                              // wrapperParameterCount on EEPROM
     0x00, 0x00, 0x00, 0x00, 0x00,      // 
     0xFA, 0xBA, 0xCA, 0xBA, 0x08, 0x01 // password
 };
@@ -102,13 +104,16 @@ public:
     static constexpr uint16_t METADATA_SIZE = 128;                        // размер хеадера
     static constexpr uint16_t CORE_START = 128;                           // адрес начала памяти для параметров axius
     static constexpr uint16_t CORE_SIZE = 2048;                           // их размер
+    uint16_t CORE_END = CORE_START;                                       //
     static constexpr uint16_t WRAPPER_START = 2176;                       // адрес начала памяти для параметров режимов
     static constexpr uint16_t WRAPPER_SIZE = TOTAL_SIZE - WRAPPER_START;  // их размер
+    uint16_t WRAPPER_END = WRAPPER_START;                                 //
     static constexpr uint8_t  FLAG_MARKER_MASK = 0b00000011;              // маска-маркер параметра
     static constexpr uint8_t  FLAG_MARKER = 0b00000001;                   // маркер во флаге о том что запись параметра валидна
     static constexpr uint8_t  FLAG_DEAD = 0b00000100;                     // флаг мертвого параметра
     static constexpr uint8_t  FLAG_TYPE_MASK = 0b01111000;                // флаг типа параметра 4 бита 9/16 разных видов максимум
     static constexpr uint8_t  FLAG_LOAD_ON_STARTUP = 0b10000000;          // флаг обязательного для прочитки параетра
+    static constexpr uint8_t  MAX_PARAMETER_COUNT = 100;
 
     EEPROM24C256 eeprom;
     uint16_t status = 0;
@@ -116,14 +121,21 @@ public:
     Memory() : eeprom() {};
 
     void setup() {
+        status = 1;
         if (isBlank()) {
-            status = formatBlankDisk() ? 1 : 3; // false on error
-        } else {
-            status = 2;
-            readMetadata();
-            mapParametersFromEEPROM();
-            //сверить может каких параметров нехватает
+            if (!formatBlankDisk()) {
+                status = 2;
+                return;
+            }
         }
+
+        if (!readMetadata()) {
+            status = 3;
+            return;
+        }
+
+        mapParametersFromEEPROM();
+        status = 4;
     }
 
     bool isBlank() {
@@ -131,10 +143,13 @@ public:
         if (!eeprom.readBytes(METADATA_START, buffer, sizeof(buffer))) {
             return false; //read error
         }
-        return memcmp(buffer, SIGNATURE, sizeof(SIGNATURE)) != 0;
+        if (memcmp(buffer, SIGNATURE, 10) != 0) return true; //сравниваем сигнатуру
+        if (memcmp(&buffer[17], &SIGNATURE[17], sizeof(SIGNATURE)-17) != 0) return true; //сравниваем пароль
+
+        return false;
     }
 
-    MemoryParameter* getParameter(const char* name) {
+    /*MemoryParameter* getParameter(const char* name) {
         if (name == nullptr) return nullptr;
 
         // Ищем с конца, чтобы последняя живая запись имела приоритет над предыдущими.
@@ -149,6 +164,20 @@ public:
         }
 
         return nullptr;
+    }*/
+
+    bool getParameter(const char* name, void* output, uint16_t outputSize) {
+        int index = -1;
+        for (uint8_t i = 0; i < parameterCount; i++) {
+            if (memcmp(memoryMap[i].name, name, min(strlen(name), (size_t)18)) == 0) index = i;
+        }
+        if (index < 0) return false;
+
+        MemoryIndex& info = memoryMap[index];
+        if (outputSize < info.valueSize) return false;
+
+        memcpy(output, parameters[index].value, info.valueSize);
+        return true;
     }
 
 private:
@@ -156,16 +185,10 @@ private:
     MemoryParameter* parameters = nullptr;  //сами параметры
     uint8_t parameterCount = 0; //общее количество
 
-    bool readMetadata() { //TODO
+    bool readMetadata() {
         eeprom.readByte(METADATA_START+10, coreParameterCount_onEEPROM);
-        if (coreParameterCount != coreParameterCount_onEEPROM) {
-            //TODO
-        }
-
         eeprom.readByte(METADATA_START+11, wrapperParameterCount_onEEPROM);
-        if (wrapperParameterCount != wrapperParameterCount_onEEPROM) {
-            //TODO
-        }
+        return true;
     }
 
     bool writeMetadata() {
@@ -175,9 +198,10 @@ private:
     }
 
     bool formatBlankDisk() {
-        if (!writeMetadata()) return false; //write error
-        if (!writeCoreDefaults()) return false; //write error
+        if (!writeCoreDefaults()) return false;
         if (!writeWrapperDefaults()) return false;
+        if (!writeMetadata()) return false;
+
         return true;
     }
 
@@ -186,6 +210,7 @@ private:
         for (uint8_t i = 0; i < coreParameterCount; i++) {
             if (!writeRecord(address, coreParametersBuiltin[i])) return false;
         }
+        CORE_END = address;
         return true;
     }
 
@@ -193,7 +218,8 @@ private:
         /*uint16_t address = WRAPPER_START;
         for (uint8_t i = 0; i < wrapperParameterCount; i++) {
             if (!writeRecord(address, coreParameters[i])) return false;
-        }*/
+        }
+        WRAPPER_END = address;*/
         return true;
     }
 
@@ -205,7 +231,7 @@ private:
                 delete[] (uint8_t*)parameters[i].defaultValue;
             }
         }
-        delete[] parameters;
+        delete[] parameters;    
         delete[] memoryMap;
 
         parameters = nullptr;
@@ -223,8 +249,8 @@ private:
 
         if (parameterCount == 0) return;
 
-        memoryMap = new MemoryIndex[parameterCount];
-        parameters = new MemoryParameter[parameterCount];
+        memoryMap = new MemoryIndex[MAX_PARAMETER_COUNT]; //ИСПРАВЛЕНО IMPORTANT TODO: нужно расширить размер до (параметры которые ожидает прошивка + параметры которые есть на EEPROM, но которые не ожидаются прошивкой)
+        parameters = new MemoryParameter[MAX_PARAMETER_COUNT];
         
         // ошибка выхода за границу блока игнорируется
         // читаем параметры ядра
@@ -244,6 +270,7 @@ private:
         if (counter < coreParameterCount_onEEPROM) {
             //TODO обработка ошибки считывания параметров ядра
         }
+        CORE_END = cursor;
 
         // читаем параметры обёртки
 
@@ -251,33 +278,81 @@ private:
         uint8_t counter2 = 0;
 
         for (uint8_t i = 0; i < wrapperParameterCount_onEEPROM; i++) {
-            bool result = readRecord(cursor, WRAPPER_START + WRAPPER_SIZE, memoryMap[counter2]); //курсор сдвигается внутри метода
+            bool result = readRecord(cursor, WRAPPER_START + WRAPPER_SIZE, memoryMap[counter+counter2]); //курсор сдвигается внутри метода
 
             if (!result) break;
 
-            memoryMap[counter].isOnEEPROM = true;
-            memoryMap[counter].isCoreParameter = false;
+            memoryMap[counter+counter2].isOnEEPROM = true;
+            memoryMap[counter+counter2].isCoreParameter = false;
             counter2++;
         }
-        if (counter2 < coreParameterCount_onEEPROM) {
+        if (counter2 < wrapperParameterCount_onEEPROM) {
             //TODO обработка ошибки считывания параметров ядра
         }
+        WRAPPER_END = cursor;
 
 
         //-------------------
 
         // загружаем в маппинг недостающие параметры
         // сравнение параметров в memoryMap с параметрами в coreParametersBuiltin и wrapperParametersBuiltin
+        
+        // сравнение и добавление недостающих параметров ядра
 
+        for (uint8_t i_builtin = 0; i_builtin < coreParameterCount; i_builtin++) {
+            bool found = false;
+            uint8_t builtinCoreParameterNameSize = min(strlen(coreParametersBuiltin[i_builtin].name), (size_t)18);
+            for (uint8_t i_eeprom = 0; i_eeprom < counter; i_eeprom++) {
+                if (memcmp(
+                    memoryMap[i_eeprom].name,
+                    coreParametersBuiltin[i_builtin].name,
+                    min(memoryMap[i_eeprom].nameSize, builtinCoreParameterNameSize)
+                ) == 0) found = true;
+            }
+            if (found) continue; //если в eeprom есть параметр который ожидает увидеть ядро, продолжаем
+            // если искомого параметра нет, нужно добавить и записать
+            memoryMap[parameterCount].address = CORE_END; //IMPORTANT TODO: выходим за рамки массива (строка 230)
+            memoryMap[parameterCount].flags = encodeFlags(coreParametersBuiltin[i_builtin].type, coreParametersBuiltin[i_builtin].flags, false);
+            memoryMap[parameterCount].isCoreParameter = true;
+            memoryMap[parameterCount].isOnEEPROM = true; //после выполнения записи
+            memoryMap[parameterCount].nameSize = builtinCoreParameterNameSize;
+            memoryMap[parameterCount].valueSize = coreParametersBuiltin[i_builtin].valueSize;
+            memcpy(memoryMap[parameterCount].name, coreParametersBuiltin[i_builtin].name, builtinCoreParameterNameSize);
+            memoryMap[parameterCount].type = coreParametersBuiltin[i_builtin].type;
+            uint16_t CORE_END_before = CORE_END;
+            writeRecord(CORE_END, coreParametersBuiltin[i_builtin]); //CORE_END увеличивается по мере заполнения новыми записями
+            memoryMap[parameterCount].recordSize = CORE_END - CORE_END_before; //размер всей записи на EEPROM
+            memoryMap[parameterCount].valueAddress = coreParametersBuiltin[i_builtin].valueAddress; //адрес значения. заполняется в writeRecord
+            memoryMap[parameterCount].defaultValueAddress = coreParametersBuiltin[i_builtin].defaultValueAddress; //адрес стандартного значения. заполняется в writeRecord
+
+            parameterCount++;
+        }
+
+        //TODO тоже самое но для недостающих параметров обёртки
+        
 
         //-------------------
+
+        // урезаем массив до актуального количества параметров
+        MemoryIndex* newMap = new MemoryIndex[parameterCount];
+        MemoryParameter* newParameters = new MemoryParameter[parameterCount];
+
+        memcpy(newMap, memoryMap, sizeof(MemoryIndex) * parameterCount);
+        memcpy(newParameters, parameters, sizeof(MemoryParameter) * parameterCount);
+
+        delete[] memoryMap;
+        delete[] parameters;
+
+        memoryMap = newMap;
+        parameters = newParameters;
+
 
         // Загружаем содержимое параметров с флагом LOAD_ON_STARTUP.
         for (uint8_t i = 0; i < parameterCount; i++) {
             if (isDead(memoryMap[i].flags)) continue;
 
             if (shouldLoadOnStartup(memoryMap[i].flags)) {
-                loadParameter(i);
+                loadParameter(i); // игнорируем ошибку считывания
             }
         }
     }
@@ -297,7 +372,7 @@ private:
             return false;
         }
 
-        if (!eeprom.readBytes(info.defaultAddress, defaultValue, info.valueSize)) {
+        if (!eeprom.readBytes(info.defaultValueAddress, defaultValue, info.valueSize)) {
             delete[] value;
             delete[] defaultValue;
             return false;
@@ -318,9 +393,9 @@ private:
 
 
 
-    bool writeRecord(uint16_t& address, const ParameterDefinition& parameter) {
+    bool writeRecord(uint16_t& address, ParameterDefinition& parameter) {
         uint16_t nameSize = strlen(parameter.name);
-        if (nameSize > 255) nameSize = 0;
+        if (nameSize > 18) nameSize = 18;
 
         if (parameter.valueSize == 0) return false;
         if (parameter.defaultValue == nullptr) return false;
@@ -356,10 +431,12 @@ private:
 
         // [VALUE]
         memcpy(&record[cursor], parameter.defaultValue, parameter.valueSize);
+        parameter.valueAddress = cursor + address;
         cursor += parameter.valueSize;
 
         // [DEFAULT_VALUE]
         memcpy(&record[cursor], parameter.defaultValue, parameter.valueSize);
+        parameter.defaultValueAddress = cursor + address;
         cursor += parameter.valueSize;
 
         bool result = eeprom.writeBytes(address, record, recordSize);
@@ -371,7 +448,7 @@ private:
         return true;
     }
 
-    bool readRecord(uint16_t address, uint16_t regionLimit, MemoryIndex& index) {
+    bool readRecord(uint16_t& address, uint16_t regionLimit, MemoryIndex& index) {
         uint8_t header[2];
 
         if (!eeprom.readBytes(address, header, 2)) return false;
@@ -409,7 +486,7 @@ private:
         index.recordSize = recordSize;
 
         index.valueAddress = cursor;
-        index.defaultAddress = cursor + valueSize;
+        index.defaultValueAddress = cursor + valueSize;
 
         index.flags = flags;
         index.nameSize = nameSize;
