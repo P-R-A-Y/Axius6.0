@@ -14,5 +14,5 @@ class memorytest : public Mode {
         uint8_t getRequiredParametersCount() override { return 0; };
     private:
         Memory memory;
-        
+        uint8_t testParameterValue = 42;
 };

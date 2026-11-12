@@ -4,9 +4,10 @@
 #ifndef Memory_h
 #define Memory_h
 
-static const char* errors = {"READ_RECORD_HEADER"};
+static const char* errors[] = { "READ_ERROR", "WRITE_ERROR" };
 enum class IOERROR {
-    READ_RECORD_HEADER
+    READ_ERROR,
+    WRITE_ERROR
 };
 
 enum class MemoryType : uint8_t {
@@ -67,6 +68,7 @@ struct MemoryParameter { //параметры (общие)
 
 //default parameters----------------------------------------
 static const uint8_t defaultBrightness = 100;
+static const uint8_t testv = 0;
 
 static ParameterDefinition coreParametersBuiltin[] = {
     {
@@ -74,6 +76,16 @@ static ParameterDefinition coreParametersBuiltin[] = {
         MemoryType::UINT8,
         &defaultBrightness,
         sizeof(defaultBrightness),
+        0,
+        0,
+        true,
+        LOAD_ON_STARTUP
+    },
+    {
+        "test.value",
+        MemoryType::UINT8,
+        &testv,
+        1,
         0,
         0,
         true,
@@ -123,18 +135,23 @@ public:
     void setup() {
         status = 1;
         if (isBlank()) {
+            Serial.println("disk is blank");
             if (!formatBlankDisk()) {
+                Serial.println("no formatting");
                 status = 2;
                 return;
             }
+            Serial.println("formatted");
         }
 
         if (!readMetadata()) {
+            Serial.println("cant read metadata");
             status = 3;
             return;
         }
-
+        Serial.println("mapping...");
         mapParametersFromEEPROM();
+        Serial.println("svvag");
         status = 4;
     }
 
@@ -143,33 +160,30 @@ public:
         if (!eeprom.readBytes(METADATA_START, buffer, sizeof(buffer))) {
             return false; //read error
         }
+        /*Serial.println("comp");
+        for (uint8_t i = 0; i < sizeof(SIGNATURE); i++) {
+            Serial.print(buffer[i]);
+            Serial.print(", ");
+        }
+        Serial.println();
+        for (uint8_t i = 0; i < sizeof(SIGNATURE); i++) {
+            Serial.print(SIGNATURE[i]);
+            Serial.print(", ");
+        }
+        Serial.println();*/
         if (memcmp(buffer, SIGNATURE, 10) != 0) return true; //сравниваем сигнатуру
         if (memcmp(&buffer[17], &SIGNATURE[17], sizeof(SIGNATURE)-17) != 0) return true; //сравниваем пароль
 
         return false;
     }
 
-    /*MemoryParameter* getParameter(const char* name) {
-        if (name == nullptr) return nullptr;
-
-        // Ищем с конца, чтобы последняя живая запись имела приоритет над предыдущими.
-        for (int32_t i = parameterCount - 1; i >= 0; i--) {
-            MemoryIndex& info = memoryMap[i];
-
-            if (isDead(info.flags)) continue;
-            if (strcmp(info.name, name) != 0) continue;
-            if (!loadParameter(i)) return nullptr;
-
-            return &parameters[i];
-        }
-
-        return nullptr;
-    }*/
-
     bool getParameter(const char* name, void* output, uint16_t outputSize) {
         int index = -1;
         for (uint8_t i = 0; i < parameterCount; i++) {
-            if (memcmp(memoryMap[i].name, name, min(strlen(name), (size_t)18)) == 0) index = i;
+            if (memcmp(memoryMap[i].name, name, min(strlen(name), (size_t)18)) == 0) {
+                index = i;
+                break;
+            }
         }
         if (index < 0) return false;
 
@@ -178,6 +192,29 @@ public:
 
         memcpy(output, parameters[index].value, info.valueSize);
         return true;
+    }
+
+    template<typename T>
+    bool setParameter(const char* name, T value) {
+        return setParameter(name, &value, sizeof(T));
+    }
+
+    bool setParameter(const char* name, void* input, uint16_t inputSize) {
+        int index = -1;
+        for (uint8_t i = 0; i < parameterCount; i++) {
+            if (memcmp(memoryMap[i].name, name, min(strlen(name), (size_t)18)) == 0) {
+                index = i;
+                break;
+            }
+        }
+        if (index < 0) return false;
+
+        MemoryIndex& info = memoryMap[index];
+        if (inputSize < info.valueSize) return false;
+
+        memcpy(parameters[index].value, input, inputSize);
+
+        return eeprom.writeBytes(info.valueAddress, (uint8_t*)input, inputSize);   
     }
 
 private:
@@ -194,7 +231,11 @@ private:
     bool writeMetadata() {
         SIGNATURE[10] = coreParameterCount;
         SIGNATURE[11] = wrapperParameterCount;
-        return eeprom.writeBytes(METADATA_START, SIGNATURE, sizeof(SIGNATURE));
+        if (eeprom.writeBytes(METADATA_START, SIGNATURE, sizeof(SIGNATURE))) return true;
+        else {
+            raiseError(IOERROR::WRITE_ERROR, ("writeMetadata() addr: "+String(METADATA_START)+" size: "+sizeof(SIGNATURE)).c_str());
+            return false;
+        }
     }
 
     bool formatBlankDisk() {
@@ -208,7 +249,10 @@ private:
     bool writeCoreDefaults() {
         uint16_t address = CORE_START;
         for (uint8_t i = 0; i < coreParameterCount; i++) {
-            if (!writeRecord(address, coreParametersBuiltin[i])) return false;
+            if (!writeRecord(address, coreParametersBuiltin[i], true)) {
+                raiseError(IOERROR::WRITE_ERROR, ("writeCoreDefaults() addr: "+String(address)+" name: "+coreParametersBuiltin[i].name+" index: "+String(i)).c_str());
+                return false;
+            }
         }
         CORE_END = address;
         return true;
@@ -320,7 +364,7 @@ private:
             memcpy(memoryMap[parameterCount].name, coreParametersBuiltin[i_builtin].name, builtinCoreParameterNameSize);
             memoryMap[parameterCount].type = coreParametersBuiltin[i_builtin].type;
             uint16_t CORE_END_before = CORE_END;
-            writeRecord(CORE_END, coreParametersBuiltin[i_builtin]); //CORE_END увеличивается по мере заполнения новыми записями
+            writeRecord(CORE_END, coreParametersBuiltin[i_builtin], true); //CORE_END увеличивается по мере заполнения новыми записями
             memoryMap[parameterCount].recordSize = CORE_END - CORE_END_before; //размер всей записи на EEPROM
             memoryMap[parameterCount].valueAddress = coreParametersBuiltin[i_builtin].valueAddress; //адрес значения. заполняется в writeRecord
             memoryMap[parameterCount].defaultValueAddress = coreParametersBuiltin[i_builtin].defaultValueAddress; //адрес стандартного значения. заполняется в writeRecord
@@ -393,7 +437,7 @@ private:
 
 
 
-    bool writeRecord(uint16_t& address, ParameterDefinition& parameter) {
+    bool writeRecord(uint16_t& address, ParameterDefinition& parameter, bool updateAddress) {
         uint16_t nameSize = strlen(parameter.name);
         if (nameSize > 18) nameSize = 18;
 
@@ -443,7 +487,7 @@ private:
         delete[] record;
         if (!result) return false;
 
-        address += recordSize;
+        if (updateAddress) address += recordSize;
 
         return true;
     }
@@ -493,6 +537,8 @@ private:
         index.valueSize = valueSize;
         index.type = decodeType(flags);
 
+        address += recordSize;
+
         return true;
     }
 
@@ -523,11 +569,11 @@ private:
     }
 
 
-    bool raiseError(IOERROR errorType, char* context) {
+    bool raiseError(IOERROR errorType, const char* context) {
         Serial.println("--------------------IO ERROR--------------------");
         Serial.print("Error \"");
-        Serial.println(errors[(int)errorType]);
-        Serial.println("\" in ");
+        Serial.print(errors[(int)errorType]);
+        Serial.print("\" in ");
         Serial.print(context);
         Serial.println();
         return false;
