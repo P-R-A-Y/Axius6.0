@@ -8,17 +8,21 @@ Axius axius;
 #include "wifi_ap_scanner.h"
 WIFIScanner scanner(&axius, 0x0000);
 
-#include <memory_test.h>
-memorytest mt(&axius);
+#include "wifi_beacon.h"
+WIFIBeacon beacon(&axius, 0x0001);
+
+/*#include <memory_test.h>
+memorytest mt(&axius);*/
 
 void setup() {
   Serial.begin(115200);
   
   axius.setKeys(D2, D1, D7);
-  axius.begin(DisplayType::oled128x64, D6, D5);
+  axius.begin(DisplayType::SSD1306, D6, D5);
 
   axius.registerMode(&scanner);
-  axius.registerMode(&mt);
+  axius.registerMode(&beacon);
+  //axius.registerMode(&mt);
 
   pinMode(ledpin, OUTPUT);
   pinMode(laserpin, OUTPUT);

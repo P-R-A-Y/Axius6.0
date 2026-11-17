@@ -45,12 +45,17 @@ void Axius::tick() {
             currentMode = getSelectedItemIndex();
             currentState = globalState::INMODE;
             closeList();
+            setAutoScreenUpdate(0);
             modes[currentMode]->setup();
             requestDisplayUpdate();
         }
     }
     if (currentState == globalState::INMODE) {
         modes[currentMode]->tick();
+    }
+
+    if (screenUpdateTime != 0 && millis()-lastScreenUpdate > screenUpdateTime) {
+        requestDisplayUpdate();
     }
 
     if (isListVisible) {
@@ -136,6 +141,8 @@ void Axius::tomenu() {
     ok_key_state = 0;
 
     stopSniffing();
+
+    setAutoScreenUpdate(0);
 }
 
 
@@ -149,6 +156,12 @@ void Axius::setChannel(uint8_t channel) {
 
 void Axius::sniffCallback(uint8_t* buf, uint16_t len) {
     if (instance) instance->onFrame(buf, len);
+}
+
+void Axius::beginFreedomWIFI() {
+    wifi_fpm_do_wakeup();
+    wifi_fpm_close();
+    wifi_set_opmode(STATION_MODE);
 }
 
 void Axius::startSniffing() {
@@ -168,6 +181,10 @@ void Axius::stopSniffing() {
 
     queueHead = 0;
     queueTail = 0;
+}
+
+bool Axius::sendWifiFrame(uint8_t *buf, int len) {
+    return wifi_send_pkt_freedom(buf, len, false) == 0;
 }
 
 // НИГГЕР АЛАРМ!!! НЕЧИТАБЕЛЬНЫЙ КОД!!!
@@ -370,6 +387,13 @@ void Axius::resetKeys() {
 //-------------------TEXT DISPLAY-------------------
 
 void Axius::drawText(String text, uint8_t row) {
+    display.setTextColor(WHITE);
+    uint8_t y = COLUMN_TOP_SHIFT + row * ROW_HEIGHT;
+    display.setCursor(0,y);
+    display.println(text);
+}
+
+void Axius::drawTextC(const char* text, uint8_t row) {
     display.setTextColor(WHITE);
     uint8_t y = COLUMN_TOP_SHIFT + row * ROW_HEIGHT;
     display.setCursor(0,y);

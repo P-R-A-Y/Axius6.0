@@ -1,5 +1,6 @@
 #include "wifi_ap_scanner.h"
-#include "Axius.h"
+#include <Axius.h>
+#include <Tools.h>
 
 void WIFIScanner::setup() {}
 
@@ -39,7 +40,7 @@ void WIFIScanner::tick() {
             while (axius->popBeacon(beacon)) {
                 bool found = false;
                 for (uint16_t i = 0; i < accessPoints.size(); i++) {
-                    if (axius->isSameMac(accessPoints[i].mac, beacon.ap_mac)) {
+                    if (Tools::isSameMac(accessPoints[i].mac, beacon.ap_mac)) {
                         accessPoints[i].lastrssi = beacon.rssi;
                         found = true;
                         break;
@@ -57,7 +58,7 @@ void WIFIScanner::tick() {
 
                 accessPoints.push_back(beaconframe);
 
-                axius->addListItem(beaconframe.ssidLen == 0 ? strmac(beaconframe.mac) : charArrayToString(beaconframe.ssid, beaconframe.ssidLen));
+                axius->addListItem(beaconframe.ssidLen == 0 ? Tools::strmac(beaconframe.mac) : Tools::charArrayToString(beaconframe.ssid, beaconframe.ssidLen));
             }
         }
     }

@@ -16,7 +16,7 @@
 //#include "Memory.h"
 
 enum class DisplayType {
-    oled128x64
+    SSD1306
 };
 
 enum class globalState {
@@ -49,6 +49,7 @@ class Axius {
         void begin(DisplayType displayType, uint8_t scl, uint8_t sda);
         void tick(); //begin tick
         void render();
+        void setAutoScreenUpdate(uint32_t everyXMillis) { screenUpdateTime = everyXMillis; };
         void endTick(); //end tick
         void setKeys(uint8_t Y_up, uint8_t Z_down, uint8_t X_ok);
         void updateKeys();
@@ -60,10 +61,11 @@ class Axius {
 
         //textDraw
         void drawText(String text, uint8_t row);
+        void drawTextC(const char *text, uint8_t row);
         void drawTextSelector(String text, uint8_t row, bool isselected);
 
         //lines display
-        void requestDisplayUpdate() { updateRequested = true; };
+        void requestDisplayUpdate() { updateRequested = true; lastScreenUpdate = millis(); };
         void openList();
         void openList(uint8_t maxLines, uint8_t startRow);
         void closeList();
@@ -75,11 +77,11 @@ class Axius {
 
         void startSniffing();
         void stopSniffing();
+        void beginFreedomWIFI();
         void setChannel(uint8_t channel);
         bool beaconQueueIsEmpty();
         bool popBeacon(BeaconInfo &result);
-
-        bool isSameMac(const uint8_t* cur, const uint8_t* tar) { return memcmp(cur, tar, 6) == 0; }
+        bool sendWifiFrame(uint8_t *buf, int len);
 
         static Axius* instance;
         //Memory memory;
@@ -117,6 +119,8 @@ class Axius {
         bool isListVisible = false;
         uint8_t MAX_ITEMS_FIT_IN_SCREEN = 5;
         uint8_t ITEMS_ROW_MARGIN = 0;
+        uint32_t screenUpdateTime = 0;
+        uint32_t lastScreenUpdate = 0;
 
         //constants
         const uint8_t ROW_HEIGHT = 8;

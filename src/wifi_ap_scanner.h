@@ -4,7 +4,7 @@
 
 class WIFIScanner : public Mode {
 public:
-    WIFIScanner(Axius* axiusInstance, uint16_t ID) : Mode(axiusInstance, ID) {}
+    WIFIScanner(Axius* axiusInstance, uint16_t ID) : Mode(axiusInstance, ID) {};
 
     void tick() override;
     void render() override;
@@ -17,45 +17,6 @@ private:
         state = State::BINDING;
         accessPoints.clear();
         accessPoints.shrink_to_fit();
-    }
-
-    const uint8_t BAD_MAC[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-    bool isMacGood(const uint8_t* arr) {
-        return memcmp(arr, BAD_MAC, 6) != 0;
-    };
-
-    String strmac(uint8_t* mac) {
-        String result = "";
-        for (int i = 0; i < 6; i++) {
-            if (mac[i] < 16) result += "0";
-            result += String(mac[i], HEX);
-            if (i < 5) result += ":";
-        }
-        return result;
-    }
-
-    String charArrayToString(char *array, size_t arraySize) {
-        String result = "";
-        for (size_t i = 0; i < arraySize; i++) {
-            if (array[i] != 0) {
-                result += array[i];
-            } else {
-                break;
-            }
-        }
-        return result;
-    }
-
-    String uint8ArrayToString(uint8_t *array, size_t arraySize) {
-        String result = "";
-        for (size_t i = 0; i < arraySize; i++) {
-            if (array[i] != 0) {
-                result += static_cast<char>(array[i]);
-            } else {
-                break;
-            }
-        }
-        return result;
     }
 
     enum class State {
